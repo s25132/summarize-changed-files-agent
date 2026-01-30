@@ -2,10 +2,6 @@ name: "Print changed Python files"
 description: "Prints changed .py files between two commits"
 
 inputs:
-  name:
-    description: "Name to greet"
-    required: true
-    default: "World"
   base_sha:
     description: "Base commit SHA"
     required: true
@@ -16,5 +12,3 @@ inputs:
 runs:
   using: "docker"
   image: "Dockerfile"
-  args:
-    - ${{ inputs.name }}
