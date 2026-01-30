@@ -1,0 +1,14 @@
+name: "Hello Python Docker Action"
+description: "Simple Docker-based GitHub Action written in Python"
+
+inputs:
+  name:
+    description: "Name to greet"
+    required: true
+    default: "World"
+
+runs:
+  using: "docker"
+  image: "Dockerfile"
+  args:
+    - ${{ inputs.name }}
