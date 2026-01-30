@@ -9,6 +9,13 @@ print(f"Hello, {name}! 👋 From Docker Action")
 
 WORKSPACE = "/github/workspace"
 
+# 🔑 IMPORTANT: allow git to work inside Docker-mounted workspace
+subprocess.run(
+    ["git", "config", "--global", "--add", "safe.directory", WORKSPACE],
+    stdout=subprocess.PIPE,
+    stderr=subprocess.PIPE,
+)
+
 print("📂 Files in repository:\n")
 
 for root, dirs, files in os.walk(WORKSPACE):
