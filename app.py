@@ -28,13 +28,31 @@ print(f"🔎 Comparing commits:")
 print(f"  base: {base_sha}")
 print(f"  head: {head_sha}\n")
 
-# ensure commits exist locally
-subprocess.run(
-    ["git", "fetch", "origin", base_sha, head_sha],
+# fetch refs from origin so commits are resolvable
+fetch = subprocess.run(
+    ["git", "fetch", "--no-tags", "--prune", "origin", "+refs/heads/*:refs/remotes/origin/*"],
     cwd=WORKSPACE,
+    text=True,
     stdout=subprocess.PIPE,
-    stderr=subprocess.PIPE,
+    stderr=subprocess.STDOUT,
 )
+
+if fetch.returncode != 0:
+    print("❌ git fetch failed")
+    print(fetch.stdout)
+    sys.exit(fetch.returncode)
+
+# if base_sha still doesn't exist (e.g. force-push), fall back to HEAD~1
+check_base = subprocess.run(
+    ["git", "cat-file", "-e", f"{base_sha}^{{commit}}"],
+    cwd=WORKSPACE,
+    stdout=subprocess.DEVNULL,
+    stderr=subprocess.DEVNULL,
+)
+
+if check_base.returncode != 0:
+    print(f"⚠️ base SHA not found locally ({base_sha}), falling back to HEAD~1")
+    base_sha = "HEAD~1"
 
 result = subprocess.run(
     ["git", "diff", "--name-only", base_sha, head_sha],
@@ -48,6 +66,7 @@ if result.returncode != 0:
     print("❌ git diff failed")
     print(result.stdout)
     sys.exit(result.returncode)
+
 
 changed_files = [
     f for f in result.stdout.splitlines()
