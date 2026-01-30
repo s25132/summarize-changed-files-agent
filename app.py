@@ -28,6 +28,14 @@ print(f"🔎 Comparing commits:")
 print(f"  base: {base_sha}")
 print(f"  head: {head_sha}\n")
 
+# ensure commits exist locally
+subprocess.run(
+    ["git", "fetch", "origin", base_sha, head_sha],
+    cwd=WORKSPACE,
+    stdout=subprocess.PIPE,
+    stderr=subprocess.PIPE,
+)
+
 result = subprocess.run(
     ["git", "diff", "--name-only", base_sha, head_sha],
     cwd=WORKSPACE,
