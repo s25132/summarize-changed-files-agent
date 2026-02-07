@@ -3,8 +3,10 @@ import subprocess
 import sys
 from typing import List
 
-WORKSPACE = "/github/workspace"
-
+WORKSPACE = os.environ.get("GITHUB_WORKSPACE")
+if not WORKSPACE:
+    print("GITHUB_WORKSPACE not set")
+    sys.exit(1)
 
 def get_changed_python_files(base_sha: str, head_sha: str) -> List[str]:
     # allow git to work on mounted repo in Docker
@@ -50,7 +52,7 @@ def main() -> None:
         for f in changed_py:
             print(f" - {f}")
     else:
-        print("ℹNo Python files changed.")
+        print("No Python files changed.")
 
 
 if __name__ == "__main__":
