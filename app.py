@@ -72,14 +72,23 @@ async def summarize_changes_with_copilot_async(changed_files, base_sha, head_sha
         print("\nBrak GH_TOKEN. Pomijam podsumowania zmian przez Copilot.")
         return
     
+    print("\nUruchamianie Copilot SDK...")
     client = CopilotClient()
-    await client.start()
     
     try:
-        session = await client.create_session({
-            "model": "gpt-4.1",
-            "github_token": gh_token
-        })
+        print("Startowanie klienta Copilot...")
+        await asyncio.wait_for(client.start(), timeout=30)
+        print("Klient uruchomiony.")
+        
+        print("Tworzenie sesji...")
+        session = await asyncio.wait_for(
+            client.create_session({
+                "model": "gpt-4.1",
+                "github_token": gh_token
+            }),
+            timeout=30
+        )
+        print("Sesja utworzona.")
         
         for f in changed_files:
             diff_result = subprocess.run(
@@ -93,17 +102,26 @@ async def summarize_changes_with_copilot_async(changed_files, base_sha, head_sha
             if diff:
                 prompt = f"Streść zmiany w pliku {f}:\n{diff}"
                 try:
-                    response = await session.send_and_wait({"prompt": prompt}, timeout=120)
+                    print(f"\nWysyłam zapytanie dla {f}...")
+                    response = await asyncio.wait_for(
+                        session.send_and_wait({"prompt": prompt}),
+                        timeout=60
+                    )
                     summary = response.data.content
                     print(f"\nPodsumowanie zmian w {f}:\n{summary}")
                 except asyncio.TimeoutError:
                     print(f"\nTimeout przy podsumowywaniu zmian w {f}.")
             else:
                 print(f"\nBrak zmian do podsumowania w {f}.")
+    except asyncio.TimeoutError as e:
+        print(f"\nTimeout podczas inicjalizacji Copilot SDK: {e}")
     except Exception as e:
         print(f"\nBłąd podczas wywoływania Copilot SDK: {e}")
     finally:
-        await client.stop()
+        try:
+            await client.stop()
+        except:
+            pass
 
 def summarize_changes_with_copilot(changed_files, base_sha, head_sha):
     asyncio.run(summarize_changes_with_copilot_async(changed_files, base_sha, head_sha))
