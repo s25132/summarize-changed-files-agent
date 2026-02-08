@@ -67,11 +67,19 @@ async def summarize_changes_with_copilot_async(changed_files, base_sha, head_sha
         print("\nCopilot SDK nie jest zainstalowany. Pomijam podsumowania zmian.")
         return
     
+    gh_token = os.environ.get("GH_TOKEN")
+    if not gh_token:
+        print("\nBrak GH_TOKEN. Pomijam podsumowania zmian przez Copilot.")
+        return
+    
     client = CopilotClient()
     await client.start()
     
     try:
-        session = await client.create_session({"model": "gpt-4.1"})
+        session = await client.create_session({
+            "model": "gpt-4.1",
+            "github_token": gh_token
+        })
         
         for f in changed_files:
             diff_result = subprocess.run(
@@ -84,11 +92,16 @@ async def summarize_changes_with_copilot_async(changed_files, base_sha, head_sha
             diff = diff_result.stdout
             if diff:
                 prompt = f"Streść zmiany w pliku {f}:\n{diff}"
-                response = await session.send_and_wait({"prompt": prompt})
-                summary = response.data.content
-                print(f"\nPodsumowanie zmian w {f}:\n{summary}")
+                try:
+                    response = await session.send_and_wait({"prompt": prompt}, timeout=120)
+                    summary = response.data.content
+                    print(f"\nPodsumowanie zmian w {f}:\n{summary}")
+                except asyncio.TimeoutError:
+                    print(f"\nTimeout przy podsumowywaniu zmian w {f}.")
             else:
                 print(f"\nBrak zmian do podsumowania w {f}.")
+    except Exception as e:
+        print(f"\nBłąd podczas wywoływania Copilot SDK: {e}")
     finally:
         await client.stop()
 
