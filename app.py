@@ -46,6 +46,10 @@ def get_changed_python_files(base_sha: str, head_sha: str) -> List[str]:
 
 
 def main() -> None:
+    
+    sh(["which", "copilot"])
+    sh(["copilot", "--version"])
+    sh(["node", "--version"])
     base_sha = os.environ.get("INPUT_BASE_SHA")
     head_sha = os.environ.get("INPUT_HEAD_SHA")
 
@@ -147,6 +151,15 @@ async def summarize_changes_with_copilot_async(changed_files, base_sha, head_sha
 
 def summarize_changes_with_copilot(changed_files, base_sha, head_sha):
     asyncio.run(summarize_changes_with_copilot_async(changed_files, base_sha, head_sha))
+
+
+def sh(cmd):
+    r = subprocess.run(cmd, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    print("\n$ " + " ".join(cmd))
+    print("exit:", r.returncode)
+    if r.stdout: print("stdout:\n", r.stdout[:2000])
+    if r.stderr: print("stderr:\n", r.stderr[:2000])
+    return r.returncode
 
 if __name__ == "__main__":
     main()
