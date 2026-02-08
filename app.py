@@ -70,6 +70,7 @@ def main() -> None:
 async def summarize_changes_with_copilot_async(changed_files, base_sha, head_sha):
     if not changed_files:
         return
+    
     if CopilotClient is None:
         print("\nCopilot SDK nie jest zainstalowany. Pomijam podsumowania zmian.")
         return
@@ -101,7 +102,7 @@ async def summarize_changes_with_copilot_async(changed_files, base_sha, head_sha
         )
         print("Sesja utworzona.")
         
-        for f in changed_files:
+        for f in changed_files[:1]:  # Limit to 1 file for testing
             diff_result = subprocess.run(
                 ["git", "diff", base_sha, head_sha, "--", f],
                 cwd=WORKSPACE,
@@ -121,12 +122,12 @@ async def summarize_changes_with_copilot_async(changed_files, base_sha, head_sha
                     print(f"\nWysyłam zapytanie dla {f} (diff length: {len(diff)})...")
                     response = await asyncio.wait_for(
                         session.send_and_wait({"prompt": f"cześć"}),
-                        timeout=90
+                        timeout=600
                     )
                     summary = response.data.content
                     print(f"\nPodsumowanie zmian w {f}:\n{summary}")
                 except asyncio.TimeoutError:
-                    print(f"\nTimeout (90s) - pomijam podsumowanie dla {f}.")
+                    print(f"\nTimeout - pomijam podsumowanie dla {f}.")
                 except Exception as e:
                     print(f"\nBłąd dla {f}: {e}")
             else:
