@@ -8,9 +8,9 @@ WORKDIR /app
 
 COPY requirements.txt /app/requirements.txt
 RUN python -m pip install --upgrade pip \
- && pip install --no-cache-dir -r /app/requirements.txt
+ && pip install --no-cache-dir -r /app/requirements.txt \
+ && chmod +x /usr/local/lib/python3.10/site-packages/copilot/bin/copilot 2>/dev/null || true
 
 COPY app.py /app/app.py
 
 ENTRYPOINT ["python", "/app/app.py"]
-
