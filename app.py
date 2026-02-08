@@ -120,7 +120,7 @@ async def summarize_changes_with_copilot_async(changed_files, base_sha, head_sha
                 try:
                     print(f"\nWysyłam zapytanie dla {f} (diff length: {len(diff)})...")
                     response = await asyncio.wait_for(
-                        session.send_and_wait({"prompt": prompt}),
+                        session.send_and_wait({"prompt": f"cześć"}),
                         timeout=90
                     )
                     summary = response.data.content
