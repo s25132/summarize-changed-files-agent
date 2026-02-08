@@ -2,6 +2,7 @@ import os
 import subprocess
 import sys
 import asyncio
+import token
 from typing import List
 from copilot import CopilotClient
 import logging
@@ -75,11 +76,13 @@ async def summarize_changes_with_copilot_async(changed_files, base_sha, head_sha
         print("\nCopilot SDK nie jest zainstalowany. Pomijam podsumowania zmian.")
         return
     
-    gh_token = os.environ.get("COPILOT_GITHUB_TOKEN")
-    if not gh_token:
-        print("\nBrak COPILOT_GITHUB_TOKEN. Pomijam podsumowania zmian przez Copilot.")
+    token = os.getenv("COPILOT_GITHUB_TOKEN") or os.getenv("GH_TOKEN") or os.getenv("GITHUB_TOKEN")
+    if not token:
+        print("No token env found (COPILOT_GITHUB_TOKEN/GH_TOKEN/GITHUB_TOKEN)")
         return
-    
+
+    os.environ["GH_TOKEN"] = token
+    os.environ["COPILOT_GITHUB_TOKEN"] = token
     
     print("GH_TOKEN set:", bool(os.getenv("GH_TOKEN")))
     print("COPILOT_GITHUB_TOKEN set:", bool(os.getenv("COPILOT_GITHUB_TOKEN")))
@@ -96,7 +99,7 @@ async def summarize_changes_with_copilot_async(changed_files, base_sha, head_sha
         session = await asyncio.wait_for(
             client.create_session({
                 "model": "gpt-4.1",
-                "github_token": gh_token
+                "streaming": False
             }),
             timeout=30
         )
