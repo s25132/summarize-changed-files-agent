@@ -16,3 +16,5 @@ runs:
   env:
     GH_TOKEN: ${{ inputs.copilot_token }}
     COPILOT_GITHUB_TOKEN: ${{ inputs.copilot_token }}
+    COPILOT_ALLOW_ALL: "1"
+
