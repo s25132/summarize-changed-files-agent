@@ -50,6 +50,9 @@ def main() -> None:
     sh(["which", "copilot"])
     sh(["copilot", "--version"])
     sh(["node", "--version"])
+
+    sh_copilot(["copilot", "explain", "print('ok')"], timeout=60)
+    
     base_sha = os.environ.get("INPUT_BASE_SHA")
     head_sha = os.environ.get("INPUT_HEAD_SHA")
 
@@ -160,6 +163,14 @@ def sh(cmd):
     if r.stdout: print("stdout:\n", r.stdout[:2000])
     if r.stderr: print("stderr:\n", r.stderr[:2000])
     return r.returncode
+
+def sh_copilot(cmd, timeout=60):
+    r = subprocess.run(cmd, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout)
+    print("\n$ " + " ".join(cmd))
+    print("exit:", r.returncode)
+    if r.stdout: print("stdout:\n", r.stdout[:3000])
+    if r.stderr: print("stderr:\n", r.stderr[:3000])
+    return r
 
 if __name__ == "__main__":
     main()
