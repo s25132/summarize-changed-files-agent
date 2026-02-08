@@ -8,9 +8,13 @@ inputs:
   head_sha:
     description: "Head commit SHA"
     required: true
+  github_token:
+    description: "GitHub token for Copilot API"
+    required: false
+    default: ${{ github.token }}
 
 runs:
   using: "docker"
   image: "Dockerfile"
   env:
-    GH_TOKEN: ${{ secrets.GH_TOKEN }}
+    GH_TOKEN: ${{ inputs.github_token }}
