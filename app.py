@@ -1,6 +1,7 @@
 import os
 import subprocess
 import sys
+import asyncio
 from typing import List
 from copilot import CopilotClient
 
@@ -59,28 +60,40 @@ def main() -> None:
     summarize_changes_with_copilot(changed_py, base_sha, head_sha)
 
 
-def summarize_changes_with_copilot(changed_files, base_sha, head_sha):
+async def summarize_changes_with_copilot_async(changed_files, base_sha, head_sha):
     if not changed_files:
         return
     if CopilotClient is None:
         print("\nCopilot SDK nie jest zainstalowany. Pomijam podsumowania zmian.")
         return
-    copilot = CopilotClient()
-    for f in changed_files:
-        diff_result = subprocess.run(
-            ["git", "diff", base_sha, head_sha, "--", f],
-            cwd=WORKSPACE,
-            text=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-        )
-        diff = diff_result.stdout
-        if diff:
-            prompt = f"Streść zmiany w pliku {f}:\n{diff}"
-            summary = copilot.complete(prompt)
-            print(f"\nPodsumowanie zmian w {f}:\n{summary}")
-        else:
-            print(f"\nBrak zmian do podsumowania w {f}.")
+    
+    client = CopilotClient()
+    await client.start()
+    
+    try:
+        session = await client.create_session({"model": "gpt-4.1"})
+        
+        for f in changed_files:
+            diff_result = subprocess.run(
+                ["git", "diff", base_sha, head_sha, "--", f],
+                cwd=WORKSPACE,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            diff = diff_result.stdout
+            if diff:
+                prompt = f"Streść zmiany w pliku {f}:\n{diff}"
+                response = await session.send_and_wait({"prompt": prompt})
+                summary = response.data.content
+                print(f"\nPodsumowanie zmian w {f}:\n{summary}")
+            else:
+                print(f"\nBrak zmian do podsumowania w {f}.")
+    finally:
+        await client.stop()
+
+def summarize_changes_with_copilot(changed_files, base_sha, head_sha):
+    asyncio.run(summarize_changes_with_copilot_async(changed_files, base_sha, head_sha))
 
 if __name__ == "__main__":
     main()
