@@ -2,10 +2,10 @@ import os
 import subprocess
 import sys
 import asyncio
-import token
-from typing import List
+from typing import List, Optional
 from copilot import CopilotClient
 import logging
+
 logging.basicConfig(level=logging.DEBUG)
 
 os.environ["COPILOT_LOG_LEVEL"] = "debug"
@@ -18,12 +18,24 @@ if not WORKSPACE:
     print("GITHUB_WORKSPACE not set")
     sys.exit(1)
 
+
+def sh(cmd: List[str], timeout: int = 60) -> int:
+    r = subprocess.run(cmd, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout)
+    print("\n$ " + " ".join(cmd))
+    print("exit:", r.returncode)
+    if r.stdout:
+        print("stdout:\n", r.stdout[:3000])
+    if r.stderr:
+        print("stderr:\n", r.stderr[:3000])
+    return r.returncode
+
+
 def get_changed_python_files(base_sha: str, head_sha: str) -> List[str]:
-    # allow git to work on mounted repo in Docker
     subprocess.run(
         ["git", "config", "--global", "--add", "safe.directory", WORKSPACE],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
+        text=True,
     )
 
     result = subprocess.run(
@@ -39,30 +51,107 @@ def get_changed_python_files(base_sha: str, head_sha: str) -> List[str]:
         print(result.stdout)
         sys.exit(result.returncode)
 
-    return [
-        f for f in result.stdout.splitlines()
-        if f.endswith(".py")
-    ]
+    return [f for f in result.stdout.splitlines() if f.endswith(".py")]
+
+
+def get_token() -> Optional[str]:
+    return os.getenv("COPILOT_GITHUB_TOKEN") or os.getenv("GH_TOKEN") or os.getenv("GITHUB_TOKEN")
+
+
+async def summarize_changes_with_copilot_async(changed_files: List[str], base_sha: str, head_sha: str) -> None:
+    if not changed_files:
+        print("No Python files changed -> skipping Copilot.")
+        return
+
+    gh_token = get_token()
+    if not gh_token:
+        print("No token env found (COPILOT_GITHUB_TOKEN/GH_TOKEN/GITHUB_TOKEN).")
+        return
+
+    # force standard env vars for CLI/SDK
+    os.environ["GH_TOKEN"] = gh_token
+    os.environ["COPILOT_GITHUB_TOKEN"] = gh_token
+
+    print("\nUruchamianie Copilot SDK...")
+    client = CopilotClient()
+
+    try:
+        print("Startowanie klienta Copilot...")
+        await asyncio.wait_for(client.start(), timeout=30)
+        print("Klient uruchomiony.")
+
+        print("Tworzenie sesji (bez wymuszania modelu)...")
+        session = await asyncio.wait_for(
+            client.create_session({"streaming": False}),
+            timeout=30,
+        )
+        print("Sesja utworzona.")
+
+        async def ask(prompt: str, t: int = 45):
+            return await asyncio.wait_for(session.send_and_wait({"prompt": prompt}), timeout=t)
+
+        # 1) TEST – jak to nie działa, to nie ma sensu diffów
+        print("\nTEST prompt: Say 'ok' and nothing else.")
+        try:
+            test_resp = await ask("Say 'ok' and nothing else.", 45)
+        except asyncio.TimeoutError:
+            print("Timeout 45s, retry...")
+            test_resp = await ask("Say 'ok' and nothing else.", 45)
+
+        print("TEST RESPONSE:", test_resp.data.content)
+
+        # 2) Summarize first changed file
+        f = changed_files[0]
+        diff_result = subprocess.run(
+            ["git", "diff", base_sha, head_sha, "--", f],
+            cwd=WORKSPACE,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        if diff_result.returncode != 0:
+            print(f"[WARN] git diff failed for {f}:\n{diff_result.stderr}")
+            return
+
+        diff = diff_result.stdout.strip()
+        if not diff:
+            print(f"Brak zmian do podsumowania w {f}.")
+            return
+
+        diff = diff[:12000]
+        prompt = f"Summarize the code changes in {f} in 2-4 bullet points:\n{diff}"
+
+        print(f"\nWysyłam zapytanie dla {f} (diff length: {len(diff)})...")
+        resp = await ask(prompt, 60)
+        print(f"\nPodsumowanie zmian w {f}:\n{resp.data.content}")
+
+    except Exception as e:
+        print(f"\nBłąd podczas wywoływania Copilot SDK: {e}")
+    finally:
+        try:
+            await client.stop()
+        except Exception:
+            pass
 
 
 def main() -> None:
-    
+    # Diagnostics (CLI + network)
     sh(["which", "copilot"])
     sh(["copilot", "--version"])
+    sh(["copilot", "--help"])
     sh(["node", "--version"])
+    sh(["git", "--version"])
+    sh(["bash", "-lc", "curl -I -sS https://api.github.com | head -n 5"])
 
-    sh_copilot(["copilot", "explain", "print('ok')"], timeout=60)
-    
     base_sha = os.environ.get("INPUT_BASE_SHA")
     head_sha = os.environ.get("INPUT_HEAD_SHA")
-
     if not base_sha or not head_sha:
         print("Missing INPUT_BASE_SHA or INPUT_HEAD_SHA")
         sys.exit(1)
-    
+
     changed_py = get_changed_python_files(base_sha, head_sha)
 
-    print(f"Comparing commits:\n  base: {base_sha}\n  head: {head_sha}\n")
+    print(f"\nComparing commits:\n  base: {base_sha}\n  head: {head_sha}\n")
 
     if changed_py:
         print("Changed Python files:")
@@ -71,106 +160,8 @@ def main() -> None:
     else:
         print("No Python files changed.")
 
-    # Podsumowanie zmian przez Copilot SDK
-    summarize_changes_with_copilot(changed_py, base_sha, head_sha)
+    asyncio.run(summarize_changes_with_copilot_async(changed_py, base_sha, head_sha))
 
-
-async def summarize_changes_with_copilot_async(changed_files, base_sha, head_sha):
-    if not changed_files:
-        return
-    
-    if CopilotClient is None:
-        print("\nCopilot SDK nie jest zainstalowany. Pomijam podsumowania zmian.")
-        return
-    
-    token = os.getenv("COPILOT_GITHUB_TOKEN") or os.getenv("GH_TOKEN") or os.getenv("GITHUB_TOKEN")
-    if not token:
-        print("No token env found (COPILOT_GITHUB_TOKEN/GH_TOKEN/GITHUB_TOKEN)")
-        return
-
-    os.environ["GH_TOKEN"] = token
-    os.environ["COPILOT_GITHUB_TOKEN"] = token
-    
-    print("GH_TOKEN set:", bool(os.getenv("GH_TOKEN")))
-    print("COPILOT_GITHUB_TOKEN set:", bool(os.getenv("COPILOT_GITHUB_TOKEN")))
-    
-    print("\nUruchamianie Copilot SDK...")
-    client = CopilotClient()
-    
-    try:
-        print("Startowanie klienta Copilot...")
-        await asyncio.wait_for(client.start(), timeout=30)
-        print("Klient uruchomiony.")
-        
-        print("Tworzenie sesji...")
-        session = await asyncio.wait_for(
-            client.create_session({
-                "model": "gpt-4.1",
-                "streaming": False
-            }),
-            timeout=30
-        )
-        print("Sesja utworzona.")
-        
-        for f in changed_files[:1]:  # Limit to 1 file for testing
-            diff_result = subprocess.run(
-                ["git", "diff", base_sha, head_sha, "--", f],
-                cwd=WORKSPACE,
-                text=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-            )
-            diff = diff_result.stdout
-            if diff:
-                # Limit diff size to prevent timeouts
-                max_diff_length = 500
-                if len(diff) > max_diff_length:
-                    diff = diff[:max_diff_length] + "\n... (diff truncated)"
-                
-                prompt = f"Briefly summarize changes in {f} (max 2 sentences):\n{diff}"
-                try:
-                    print(f"\nWysyłam zapytanie dla {f} (diff length: {len(diff)})...")
-                    response = await asyncio.wait_for(
-                        session.send_and_wait({"prompt": f"cześć"}),
-                        timeout=600
-                    )
-                    summary = response.data.content
-                    print(f"\nPodsumowanie zmian w {f}:\n{summary}")
-                except asyncio.TimeoutError:
-                    print(f"\nTimeout - pomijam podsumowanie dla {f}.")
-                except Exception as e:
-                    print(f"\nBłąd dla {f}: {e}")
-            else:
-                print(f"\nBrak zmian do podsumowania w {f}.")
-    except asyncio.TimeoutError as e:
-        print(f"\nTimeout podczas inicjalizacji Copilot SDK: {e}")
-    except Exception as e:
-        print(f"\nBłąd podczas wywoływania Copilot SDK: {e}")
-    finally:
-        try:
-            await client.stop()
-        except:
-            pass
-
-def summarize_changes_with_copilot(changed_files, base_sha, head_sha):
-    asyncio.run(summarize_changes_with_copilot_async(changed_files, base_sha, head_sha))
-
-
-def sh(cmd):
-    r = subprocess.run(cmd, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-    print("\n$ " + " ".join(cmd))
-    print("exit:", r.returncode)
-    if r.stdout: print("stdout:\n", r.stdout[:2000])
-    if r.stderr: print("stderr:\n", r.stderr[:2000])
-    return r.returncode
-
-def sh_copilot(cmd, timeout=60):
-    r = subprocess.run(cmd, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout)
-    print("\n$ " + " ".join(cmd))
-    print("exit:", r.returncode)
-    if r.stdout: print("stdout:\n", r.stdout[:3000])
-    if r.stderr: print("stderr:\n", r.stderr[:3000])
-    return r
 
 if __name__ == "__main__":
     main()
