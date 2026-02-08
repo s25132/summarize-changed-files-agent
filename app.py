@@ -100,17 +100,24 @@ async def summarize_changes_with_copilot_async(changed_files, base_sha, head_sha
             )
             diff = diff_result.stdout
             if diff:
-                prompt = f"Streść zmiany w pliku {f}:\n{diff}"
+                # Limit diff size to prevent timeouts
+                max_diff_length = 500
+                if len(diff) > max_diff_length:
+                    diff = diff[:max_diff_length] + "\n... (diff truncated)"
+                
+                prompt = f"Briefly summarize changes in {f} (max 2 sentences):\n{diff}"
                 try:
-                    print(f"\nWysyłam zapytanie dla {f}...")
+                    print(f"\nWysyłam zapytanie dla {f} (diff length: {len(diff)})...")
                     response = await asyncio.wait_for(
                         session.send_and_wait({"prompt": prompt}),
-                        timeout=60
+                        timeout=90
                     )
                     summary = response.data.content
                     print(f"\nPodsumowanie zmian w {f}:\n{summary}")
                 except asyncio.TimeoutError:
-                    print(f"\nTimeout przy podsumowywaniu zmian w {f}.")
+                    print(f"\nTimeout (90s) - pomijam podsumowanie dla {f}.")
+                except Exception as e:
+                    print(f"\nBłąd dla {f}: {e}")
             else:
                 print(f"\nBrak zmian do podsumowania w {f}.")
     except asyncio.TimeoutError as e:
