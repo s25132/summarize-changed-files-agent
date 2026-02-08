@@ -67,9 +67,9 @@ async def summarize_changes_with_copilot_async(changed_files, base_sha, head_sha
         print("\nCopilot SDK nie jest zainstalowany. Pomijam podsumowania zmian.")
         return
     
-    gh_token = os.environ.get("GH_TOKEN")
+    gh_token = os.environ.get("COPILOT_GITHUB_TOKEN")
     if not gh_token:
-        print("\nBrak GH_TOKEN. Pomijam podsumowania zmian przez Copilot.")
+        print("\nBrak COPILOT_GITHUB_TOKEN. Pomijam podsumowania zmian przez Copilot.")
         return
     
     print("\nUruchamianie Copilot SDK...")
