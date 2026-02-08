@@ -2,8 +2,7 @@ import os
 import subprocess
 import sys
 from typing import List
-from github_copilot_sdk import Copilot
-
+from copilot import CopilotClient
 
 WORKSPACE = os.environ.get("GITHUB_WORKSPACE")
 if not WORKSPACE:
@@ -63,10 +62,10 @@ def main() -> None:
 def summarize_changes_with_copilot(changed_files, base_sha, head_sha):
     if not changed_files:
         return
-    if Copilot is None:
+    if CopilotClient is None:
         print("\nCopilot SDK nie jest zainstalowany. Pomijam podsumowania zmian.")
         return
-    copilot = Copilot()
+    copilot = CopilotClient()
     for f in changed_files:
         diff_result = subprocess.run(
             ["git", "diff", base_sha, head_sha, "--", f],
