@@ -4,6 +4,13 @@ import sys
 import asyncio
 from typing import List
 from copilot import CopilotClient
+import logging
+logging.basicConfig(level=logging.DEBUG)
+
+os.environ["COPILOT_LOG_LEVEL"] = "debug"
+os.environ["COPILOT_SDK_LOG_LEVEL"] = "debug"
+os.environ["GH_LOG_LEVEL"] = "debug"
+os.environ["DEBUG"] = "*copilot*"
 
 WORKSPACE = os.environ.get("GITHUB_WORKSPACE")
 if not WORKSPACE:
@@ -71,6 +78,10 @@ async def summarize_changes_with_copilot_async(changed_files, base_sha, head_sha
     if not gh_token:
         print("\nBrak COPILOT_GITHUB_TOKEN. Pomijam podsumowania zmian przez Copilot.")
         return
+    
+    
+    print("GH_TOKEN set:", bool(os.getenv("GH_TOKEN")))
+    print("COPILOT_GITHUB_TOKEN set:", bool(os.getenv("COPILOT_GITHUB_TOKEN")))
     
     print("\nUruchamianie Copilot SDK...")
     client = CopilotClient()
