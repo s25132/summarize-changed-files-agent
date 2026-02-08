@@ -25,8 +25,8 @@ RUN which git && git --version \
  && which node && node --version \
  && which copilot && copilot --version
 
-RUN rm -f /usr/local/lib/python3.10/site-packages/copilot/bin/copilot || true \
- && which copilot && copilot --version
+RUN chmod +x /usr/local/lib/python3.10/site-packages/copilot/bin/copilot \
+ && ls -l /usr/local/lib/python3.10/site-packages/copilot/bin/copilot
 
 COPY app.py /app/app.py
 
