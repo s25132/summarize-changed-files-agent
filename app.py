@@ -2,6 +2,8 @@ import os
 import subprocess
 import sys
 from typing import List
+from github_copilot_sdk import Copilot
+
 
 WORKSPACE = os.environ.get("GITHUB_WORKSPACE")
 if not WORKSPACE:
@@ -54,6 +56,32 @@ def main() -> None:
     else:
         print("No Python files changed.")
 
+    # Podsumowanie zmian przez Copilot SDK
+    summarize_changes_with_copilot(changed_py, base_sha, head_sha)
+
+
+def summarize_changes_with_copilot(changed_files, base_sha, head_sha):
+    if not changed_files:
+        return
+    if Copilot is None:
+        print("\nCopilot SDK nie jest zainstalowany. Pomijam podsumowania zmian.")
+        return
+    copilot = Copilot()
+    for f in changed_files:
+        diff_result = subprocess.run(
+            ["git", "diff", base_sha, head_sha, "--", f],
+            cwd=WORKSPACE,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+        diff = diff_result.stdout
+        if diff:
+            prompt = f"Streść zmiany w pliku {f}:\n{diff}"
+            summary = copilot.complete(prompt)
+            print(f"\nPodsumowanie zmian w {f}:\n{summary}")
+        else:
+            print(f"\nBrak zmian do podsumowania w {f}.")
 
 if __name__ == "__main__":
     main()
