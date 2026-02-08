@@ -13,3 +13,4 @@ RUN python -m pip install --upgrade pip \
 COPY app.py /app/app.py
 
 ENTRYPOINT ["python", "/app/app.py"]
+
