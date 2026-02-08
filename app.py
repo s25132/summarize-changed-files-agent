@@ -5,6 +5,7 @@ import asyncio
 from typing import List, Optional
 from copilot import CopilotClient
 import logging
+import traceback
 
 logging.basicConfig(level=logging.DEBUG)
 
@@ -95,8 +96,13 @@ async def summarize_changes_with_copilot_async(changed_files: List[str], base_sh
         try:
             test_resp = await ask("Say 'ok' and nothing else.", 45)
         except asyncio.TimeoutError:
-            print("Timeout 45s, retry...")
-            test_resp = await ask("Say 'ok' and nothing else.", 45)
+            print("Timeout 45s. Dumping diagnostics...")
+            sh(["bash", "-lc", "ps aux | head -200"])
+            sh(["bash", "-lc", "env | sort | grep -E 'GH_TOKEN|COPILOT|GITHUB' | sed 's/=.*/=<redacted>/'"])
+            sh(["bash", "-lc", "curl -i -sS https://api.github.com | head -n 20"])
+            # sprawdź czy token działa (nie wypisuje tokena)
+            sh(["bash", "-lc", "curl -i -sS -H \"Authorization: Bearer $GH_TOKEN\" -H \"Accept: application/vnd.github+json\" https://api.github.com/user | head -n 40"])
+            raise
 
         print("TEST RESPONSE:", test_resp.data.content)
 
@@ -126,7 +132,8 @@ async def summarize_changes_with_copilot_async(changed_files: List[str], base_sh
         print(f"\nPodsumowanie zmian w {f}:\n{resp.data.content}")
 
     except Exception as e:
-        print(f"\nBłąd podczas wywoływania Copilot SDK: {e}")
+        print("\nBłąd podczas wywoływania Copilot SDK (repr):", repr(e))
+        traceback.print_exc()
     finally:
         try:
             await client.stop()
@@ -142,6 +149,7 @@ def main() -> None:
     sh(["node", "--version"])
     sh(["git", "--version"])
     sh(["bash", "-lc", "curl -I -sS https://api.github.com | head -n 5"])
+    sh(["bash", "-lc", "copilot --help | head -n 120"])
 
     base_sha = os.environ.get("INPUT_BASE_SHA")
     head_sha = os.environ.get("INPUT_HEAD_SHA")
