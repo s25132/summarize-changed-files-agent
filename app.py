@@ -159,17 +159,20 @@ You already have the commit SHAs:
 
 STRICT RULES:
 - Do NOT ask for parameters.
-- You MUST call the tools.
+- You MUST call the tools with proper parameters.
 - First call get_changed_python_files_tool.
 - Then call get_file_diff_tool for each returned file.
 - Only after using the tools, output the Markdown report.
 
 TASK:
-1) Call get_changed_python_files_tool with base_sha="{base_sha}" and head_sha="{head_sha}".
-2) For each returned Python file, call get_file_diff_tool with the same SHAs and file_path.
+1) Call get_changed_python_files_tool with parameters: {{"base_sha": "{base_sha}", "head_sha": "{head_sha}"}}
+2) For each returned Python file, call get_file_diff_tool with parameters: {{"base_sha": "{base_sha}", "head_sha": "{head_sha}", "file_path": "<filename>"}}
 3) Output Markdown:
    - For each file: 2–4 bullet points summarizing the changes.
    - Include a "Risks" section if applicable.
+
+EXAMPLE TOOL CALL:
+get_changed_python_files_tool({{"base_sha": "{base_sha}", "head_sha": "{head_sha}"}})
 """
 
         # ==========================================
