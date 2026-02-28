@@ -42,8 +42,40 @@ def get_token() -> Optional[str]:
     return os.getenv("COPILOT_GITHUB_TOKEN") or os.getenv("GH_TOKEN") or os.getenv("GITHUB_TOKEN")
 
 
-async def summarize_changes_with_copilot_async(changed_files: List[str], base_sha: str, head_sha: str) -> None:
-    if not changed_files:
+def summarize_changed_file(file, base_sha, head_sha) -> str:
+            diff_result = subprocess.run(
+                ["git", "diff", base_sha, head_sha, "--", file],
+                cwd=WORKSPACE,
+                text=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            if diff_result.returncode != 0:
+                print(f"[WARN] git diff failed for {file}:\n{diff_result.stderr}")
+                return
+
+            diff = diff_result.stdout.strip()
+            if not diff:
+                return
+
+            return diff[:12000]
+
+
+def summarize_changed_files(changed_files: List[str], base_sha: str, head_sha: str) -> dict:
+        changed_files_summaries = {}
+        for f in changed_files:
+            diff = summarize_changed_file(f, base_sha, head_sha)
+            if not diff:
+                print(f"Brak zmian do podsumowania w {f}.")
+                continue
+            changed_files_summaries[f] = diff
+
+        return changed_files_summaries
+
+
+
+async def summarize_changes_with_copilot_async(changed_files_summaries: dict) -> None:
+    if not changed_files_summaries:
         print("No Python files changed -> skipping Copilot.")
         return
 
@@ -75,24 +107,7 @@ async def summarize_changes_with_copilot_async(changed_files: List[str], base_sh
             return await asyncio.wait_for(session.send_and_wait({"prompt": prompt}), timeout=t)
 
         # 2) Summarize changed files
-        for f in changed_files:
-            diff_result = subprocess.run(
-                ["git", "diff", base_sha, head_sha, "--", f],
-                cwd=WORKSPACE,
-                text=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-            )
-            if diff_result.returncode != 0:
-                print(f"[WARN] git diff failed for {f}:\n{diff_result.stderr}")
-                continue
-
-            diff = diff_result.stdout.strip()
-            if not diff:
-                print(f"Brak zmian do podsumowania w {f}.")
-                continue
-
-            diff = diff[:12000]
+        for f, diff in changed_files_summaries.items():
             prompt = f"Summarize the code changes in {f} in 2-4 bullet points:\n{diff}"
 
             print(f"\nWysyłam zapytanie dla {f} (diff length: {len(diff)})...")
@@ -128,7 +143,13 @@ def main() -> None:
     else:
         print("No Python files changed.")
 
-    asyncio.run(summarize_changes_with_copilot_async(changed_py, base_sha, head_sha))
+    changed_files_summaries = summarize_changed_files(changed_py, base_sha, head_sha)
+
+    if not changed_files_summaries:
+        print("\nNo changes to summarize with Copilot.")
+        return
+
+    asyncio.run(summarize_changes_with_copilot_async(changed_files_summaries))
 
 
 if __name__ == "__main__":

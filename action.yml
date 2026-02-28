@@ -1,4 +1,4 @@
-name: "Print changed Python files"
+name: "Description of changes"
 description: "Prints changed .py files between two commits"
 
 inputs:
