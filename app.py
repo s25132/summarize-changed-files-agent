@@ -148,49 +148,36 @@ You are a senior code review agent.
 
 Return the final report in Markdown.
 """
-
-        # ==========================================
-        # STREAMING HANDLERS
-        # ==========================================
-
-        def on_delta(event):
+        def handle_event(event):
+            # event.type może być enumem albo stringiem – zrobimy odporne porównanie
+            et = getattr(event, "type", None)
             data = getattr(event, "data", None)
-            if not data:
-                return
 
-            chunk = (
-                getattr(data, "delta_content", None)
-                or getattr(data, "deltaContent", None)
-                or ""
-            )
+            # Najczęściej: delta content odpowiedzi
+            if data is not None:
+                chunk = (
+                    getattr(data, "delta_content", None)
+                    or getattr(data, "deltaContent", None)
+                    or getattr(data, "delta_content", None)
+                    or ""
+                )
+                if chunk:
+                    print(chunk, end="", flush=True)
 
-            if chunk:
-                print(chunk, end="", flush=True)
+            # (opcjonalnie) wykryj koniec – nie zawsze potrzebne
+            # Jeśli masz enum SessionEventType, możesz tu dodać warunek na idle.
+            # Na razie nie robimy nic, bo po send_and_wait i tak wyjdziesz.
 
-        def on_idle(event):
-            print("\n", flush=True)
-
-        # Podpinamy eventy
-        unsub_delta = session.on("assistant.message_delta", on_delta)
-        unsub_idle = session.on("session.idle", on_idle)
+        session.on(handle_event)
 
         # ==========================================
         # WYWOŁANIE AGENTA
         # ==========================================
 
-        response = await session.send_and_wait({
-            "prompt": prompt
-        })
+        await session.send_and_wait({"prompt": prompt})
 
-        # Jeśli z jakiegoś powodu streaming nie wypisał treści:
-        if response and getattr(response, "data", None):
-            content = getattr(response.data, "content", None)
-            if content:
-                print(content)
-
-        # Sprzątanie listenerów
-        unsub_delta()
-        unsub_idle()
+        # Dla pewności nowa linia po streamingu
+        print("\n", flush=True)
 
     except Exception as e:
         print("\nERROR:", repr(e))
