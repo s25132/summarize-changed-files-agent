@@ -135,18 +135,30 @@ async def run_agent(base_sha: str, head_sha: str):
         prompt = f"""
 You are a senior code review agent.
 
-1. Call get_changed_python_files_tool with:
+You have the commit SHAs already:
+- base_sha: {base_sha}
+- head_sha: {head_sha}
+
+STRICT RULES:
+- Do NOT ask for parameters.
+- Do NOT request SHAs.
+- Do NOT answer until you have called the tools.
+- You MUST call get_changed_python_files_tool first, then get_file_diff_tool for each returned file.
+
+TASK:
+1) Call get_changed_python_files_tool with:
    base_sha="{base_sha}"
    head_sha="{head_sha}"
 
-2. For each returned Python file, call get_file_diff_tool.
+2) For each returned Python file, call get_file_diff_tool with:
+   base_sha="{base_sha}"
+   head_sha="{head_sha}"
+   file_path="<that file>"
+   max_chars=12000
 
-3. Summarize each file in 2–4 bullet points.
-
-4. If you detect risks (breaking changes, security, missing tests),
-   add a short "Risks" section.
-
-Return the final report in Markdown.
+3) Then output a Markdown report:
+- For each file: 2–4 bullet points summarizing the changes.
+- Add a "Risks" section if applicable.
 """
         def handle_event(event):
             # event.type może być enumem albo stringiem – zrobimy odporne porównanie
