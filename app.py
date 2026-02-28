@@ -1,11 +1,16 @@
-import os
-import subprocess
-import sys
 import asyncio
-from typing import List, Optional
+import random
+import sys
+import os
+from typing import Optional
 from copilot import CopilotClient
-import traceback
+from copilot.tools import define_tool
+from copilot.generated.session_events import SessionEventType
+from pydantic import BaseModel, Field
 
+# Define the parameters for the tool using Pydantic
+class GetWeatherParams(BaseModel):
+    city: str = Field(description="The name of the city to get weather for")
 
 
 WORKSPACE = os.environ.get("GITHUB_WORKSPACE")
@@ -14,71 +19,20 @@ if not WORKSPACE:
     sys.exit(1)
 
 
-def get_changed_python_files(base_sha: str, head_sha: str) -> List[str]:
-    subprocess.run(
-        ["git", "config", "--global", "--add", "safe.directory", WORKSPACE],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-    )
-
-    result = subprocess.run(
-        ["git", "diff", "--name-only", base_sha, head_sha],
-        cwd=WORKSPACE,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-    )
-
-    if result.returncode != 0:
-        print("git diff failed")
-        print(result.stdout)
-        sys.exit(result.returncode)
-
-    return [f for f in result.stdout.splitlines() if f.endswith(".py")]
-
-
 def get_token() -> Optional[str]:
     return os.getenv("COPILOT_GITHUB_TOKEN") or os.getenv("GH_TOKEN") or os.getenv("GITHUB_TOKEN")
 
+# Define a tool that Copilot can call
+@define_tool(description="Get the current weather for a city")
+async def get_weather(params: GetWeatherParams) -> dict:
+    city = params.city
+    # In a real app, you'd call a weather API here
+    conditions = ["sunny", "cloudy", "rainy", "partly cloudy"]
+    temp = random.randint(50, 80)
+    condition = random.choice(conditions)
+    return {"city": city, "temperature": f"{temp}°F", "condition": condition}
 
-def summarize_changed_file(file, base_sha, head_sha) -> str:
-            diff_result = subprocess.run(
-                ["git", "diff", base_sha, head_sha, "--", file],
-                cwd=WORKSPACE,
-                text=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-            )
-            if diff_result.returncode != 0:
-                print(f"[WARN] git diff failed for {file}:\n{diff_result.stderr}")
-                return
-
-            diff = diff_result.stdout.strip()
-            if not diff:
-                return
-
-            return diff[:12000]
-
-
-def summarize_changed_files(changed_files: List[str], base_sha: str, head_sha: str) -> dict:
-        changed_files_summaries = {}
-        for f in changed_files:
-            diff = summarize_changed_file(f, base_sha, head_sha)
-            if not diff:
-                print(f"Brak zmian do podsumowania w {f}.")
-                continue
-            changed_files_summaries[f] = diff
-
-        return changed_files_summaries
-
-
-
-async def summarize_changes_with_copilot_async(changed_files_summaries: dict) -> None:
-    if not changed_files_summaries:
-        print("No Python files changed -> skipping Copilot.")
-        return
-
+async def main():
     gh_token = get_token()
     if not gh_token:
         print("No token env found (COPILOT_GITHUB_TOKEN/GH_TOKEN/GITHUB_TOKEN).")
@@ -90,67 +44,27 @@ async def summarize_changes_with_copilot_async(changed_files_summaries: dict) ->
 
     print("\nUruchamianie Copilot SDK...")
     client = CopilotClient()
+    await client.start()
 
-    try:
-        print("Startowanie klienta Copilot...")
-        await asyncio.wait_for(client.start(), timeout=30)
-        print("Klient uruchomiony.")
+    session = await client.create_session({
+        "model": "gpt-4.1",
+        "streaming": True,
+        "tools": [get_weather],
+    })
 
-        print("Tworzenie sesji z modelem GPT-4.1...")
-        session = await asyncio.wait_for(
-            client.create_session({"streaming": False, "model": "gpt-4.1"}),
-            timeout=30,
-        )
-        print("Sesja utworzona.")
+    def handle_event(event):
+        if event.type == SessionEventType.ASSISTANT_MESSAGE_DELTA:
+            sys.stdout.write(event.data.delta_content)
+            sys.stdout.flush()
+        if event.type == SessionEventType.SESSION_IDLE:
+            print()
 
-        async def ask(prompt: str, t: int = 45):
-            return await asyncio.wait_for(session.send_and_wait({"prompt": prompt}), timeout=t)
+    session.on(handle_event)
 
-        # 2) Summarize changed files
-        for f, diff in changed_files_summaries.items():
-            prompt = f"Summarize the code changes in {f} in 2-4 bullet points:\n{diff}"
+    await session.send_and_wait({
+        "prompt": "What's the weather like in Seattle and Tokyo?"
+    })
 
-            print(f"\nWysyłam zapytanie dla {f} (diff length: {len(diff)})...")
-            resp = await ask(prompt, 60)
-            print(f"\nPodsumowanie zmian w {f}:\n{resp.data.content}")
+    await client.stop()
 
-    except Exception as e:
-        print("\nBłąd podczas wywoływania Copilot SDK (repr):", repr(e))
-        traceback.print_exc()
-    finally:
-        try:
-            await client.stop()
-        except Exception:
-            pass
-
-
-def main() -> None:
-
-    base_sha = os.environ.get("INPUT_BASE_SHA")
-    head_sha = os.environ.get("INPUT_HEAD_SHA")
-    if not base_sha or not head_sha:
-        print("Missing INPUT_BASE_SHA or INPUT_HEAD_SHA")
-        sys.exit(1)
-
-    changed_py = get_changed_python_files(base_sha, head_sha)
-
-    print(f"\nComparing commits:\n  base: {base_sha}\n  head: {head_sha}\n")
-
-    if changed_py:
-        print("Changed Python files:")
-        for f in changed_py:
-            print(f" - {f}")
-    else:
-        print("No Python files changed.")
-
-    changed_files_summaries = summarize_changed_files(changed_py, base_sha, head_sha)
-
-    if not changed_files_summaries:
-        print("\nNo changes to summarize with Copilot.")
-        return
-
-    asyncio.run(summarize_changes_with_copilot_async(changed_files_summaries))
-
-
-if __name__ == "__main__":
-    main()
+asyncio.run(main())
