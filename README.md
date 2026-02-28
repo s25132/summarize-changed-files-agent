@@ -88,8 +88,7 @@ async def main():
 
     def handle_event(event):
         if event.type == SessionEventType.ASSISTANT_MESSAGE_DELTA:
-            sys.stdout.write(event.data.delta_content)
-            sys.stdout.flush()
+            print(event.data.delta_content, end="", flush=True)
         if event.type == SessionEventType.SESSION_IDLE:
             print()
 
