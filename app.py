@@ -4,10 +4,15 @@ import subprocess
 import asyncio
 import traceback
 from typing import Optional
+from dataclasses import dataclass
 
 from copilot import CopilotClient
 from copilot.tools import define_tool
 
+
+# ==========================================
+# ENV
+# ==========================================
 
 WORKSPACE = os.environ.get("GITHUB_WORKSPACE")
 if not WORKSPACE:
@@ -33,15 +38,36 @@ def ensure_safe_directory():
 
 
 # ==========================================
-# TOOL 1: Get changed Python files
-# IMPORTANT: explicit args (NOT params: dict)
+# TOOL PARAM SCHEMAS (IMPORTANT)
 # ==========================================
-@define_tool(description="Get changed Python files between two git commits. Parameters: base_sha: the base commit SHA head_sha: the head commit SHA ")
-async def get_changed_python_files_tool(base_sha: str, head_sha: str) -> dict:
-    print(f"[TOOL] get_changed_python_files_tool(base_sha={base_sha}, head_sha={head_sha})", flush=True)
 
-    if not base_sha or not head_sha:
-        return {"ok": False, "error": "Missing base_sha or head_sha"}
+@dataclass
+class ChangedFilesParams:
+    base_sha: str
+    head_sha: str
+
+
+@dataclass
+class FileDiffParams:
+    base_sha: str
+    head_sha: str
+    file_path: str
+    max_chars: int = 12000
+
+
+# ==========================================
+# TOOL 1
+# ==========================================
+
+@define_tool(description="Get changed Python files between two git commits.")
+async def get_changed_python_files_tool(
+    params: ChangedFilesParams,
+    context=None
+) -> dict:
+    print(f"[TOOL] get_changed_python_files_tool params={params}", flush=True)
+
+    base_sha = params.base_sha
+    head_sha = params.head_sha
 
     ensure_safe_directory()
 
@@ -57,27 +83,25 @@ async def get_changed_python_files_tool(base_sha: str, head_sha: str) -> dict:
         return {"ok": False, "error": result.stdout}
 
     files = [f for f in result.stdout.splitlines() if f.endswith(".py")]
+
     return {"ok": True, "files": files}
 
 
 # ==========================================
-# TOOL 2: Get file diff
-# IMPORTANT: explicit args (NOT params: dict)
+# TOOL 2
 # ==========================================
-@define_tool(description="Get git diff for a file between two commits. Parameters: base_sha: the base commit SHA head_sha: the head commit SHA file_path: path to the file max_chars: maximum length of diff")
-async def get_file_diff_tool(base_sha: str, head_sha: str, file_path: str, max_chars: int = 12000) -> dict:
-    print(
-        f"[TOOL] get_file_diff_tool(base_sha={base_sha}, head_sha={head_sha}, file_path={file_path}, max_chars={max_chars})",
-        flush=True,
-    )
 
-    if not base_sha or not head_sha or not file_path:
-        return {"ok": False, "error": "Missing required parameters"}
+@define_tool(description="Get git diff for a file between two commits.")
+async def get_file_diff_tool(
+    params: FileDiffParams,
+    context=None
+) -> dict:
+    print(f"[TOOL] get_file_diff_tool params={params}", flush=True)
 
     ensure_safe_directory()
 
     diff_result = subprocess.run(
-        ["git", "diff", base_sha, head_sha, "--", file_path],
+        ["git", "diff", params.base_sha, params.head_sha, "--", params.file_path],
         cwd=WORKSPACE,
         text=True,
         stdout=subprocess.PIPE,
@@ -88,16 +112,22 @@ async def get_file_diff_tool(base_sha: str, head_sha: str, file_path: str, max_c
         return {"ok": False, "error": diff_result.stderr}
 
     diff = (diff_result.stdout or "").strip()
+
     if not diff:
-        return {"ok": True, "file_path": file_path, "diff": "", "note": "No changes"}
+        return {"ok": True, "file_path": params.file_path, "diff": "", "note": "No changes"}
 
-    if len(diff) > max_chars:
-        diff = diff[:max_chars] + "\n... [truncated]"
+    if len(diff) > params.max_chars:
+        diff = diff[: params.max_chars] + "\n... [truncated]"
 
-    return {"ok": True, "file_path": file_path, "diff": diff}
+    return {"ok": True, "file_path": params.file_path, "diff": diff}
 
+
+# ==========================================
+# AGENT RUNNER
+# ==========================================
 
 async def run_agent(base_sha: str, head_sha: str):
+
     token = get_token()
     if not token:
         print("No GitHub token found.")
@@ -114,7 +144,10 @@ async def run_agent(base_sha: str, head_sha: str):
         session = await client.create_session({
             "model": "gpt-4.1",
             "streaming": True,
-            "tools": [get_changed_python_files_tool, get_file_diff_tool],
+            "tools": [
+                get_changed_python_files_tool,
+                get_file_diff_tool
+            ],
         })
 
         prompt = f"""
@@ -126,17 +159,22 @@ You already have the commit SHAs:
 
 STRICT RULES:
 - Do NOT ask for parameters.
-- You MUST call the tools (first get_changed_python_files_tool, then get_file_diff_tool for each file).
+- You MUST call the tools.
+- First call get_changed_python_files_tool.
+- Then call get_file_diff_tool for each returned file.
 - Only after using the tools, output the Markdown report.
 
 TASK:
-1) Call get_changed_python_files_tool with base_sha="{base_sha}" and head_sha="{head_sha}".
-2) For each returned Python file, call get_file_diff_tool with:
-   base_sha="{base_sha}", head_sha="{head_sha}", file_path="<that file>", max_chars=12000
+1) Call get_changed_python_files_tool.
+2) For each returned Python file, call get_file_diff_tool.
 3) Output Markdown:
-- For each file: 2–4 bullet points.
-- Include "Risks" section if applicable.
+   - For each file: 2–4 bullet points summarizing the changes.
+   - Include a "Risks" section if applicable.
 """
+
+        # ==========================================
+        # STREAMING HANDLER
+        # ==========================================
 
         def handle_event(event):
             data = getattr(event, "data", None)
@@ -150,6 +188,7 @@ TASK:
                 or getattr(data, "text", None)
                 or ""
             )
+
             if chunk:
                 print(chunk, end="", flush=True)
 
@@ -161,12 +200,17 @@ TASK:
     except Exception as e:
         print("\nERROR:", repr(e))
         traceback.print_exc()
+
     finally:
         try:
             await client.stop()
         except Exception:
             pass
 
+
+# ==========================================
+# MAIN
+# ==========================================
 
 def main():
     base_sha = os.environ.get("INPUT_BASE_SHA")
@@ -177,6 +221,7 @@ def main():
         sys.exit(1)
 
     print(f"Comparing commits:\n  base: {base_sha}\n  head: {head_sha}\n", flush=True)
+
     asyncio.run(run_agent(base_sha, head_sha))
 
 
