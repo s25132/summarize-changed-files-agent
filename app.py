@@ -61,8 +61,7 @@ class FileDiffParams:
 
 @define_tool(description="Get changed Python files between two git commits.")
 async def get_changed_python_files_tool(
-    params: ChangedFilesParams,
-    context=None
+    params: ChangedFilesParams
 ) -> dict:
     print(f"[TOOL] get_changed_python_files_tool params={params}", flush=True)
 
@@ -93,8 +92,7 @@ async def get_changed_python_files_tool(
 
 @define_tool(description="Get git diff for a file between two commits.")
 async def get_file_diff_tool(
-    params: FileDiffParams,
-    context=None
+    params: FileDiffParams
 ) -> dict:
     print(f"[TOOL] get_file_diff_tool params={params}", flush=True)
 
