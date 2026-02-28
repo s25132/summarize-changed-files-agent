@@ -125,7 +125,7 @@ async def run_agent(base_sha: str, head_sha: str):
 
         session = await client.create_session({
             "model": "gpt-4.1",
-            "streaming": True,
+            "streaming": True,  # ✅ zostaje
             "tools": [
                 get_changed_python_files_tool,
                 get_file_diff_tool
@@ -149,34 +149,48 @@ You are a senior code review agent.
 Return the final report in Markdown.
 """
 
-        async for event in session.send_stream({"prompt": prompt}):
+        # ==========================================
+        # STREAMING HANDLERS
+        # ==========================================
 
-            # Model writes text
-            if getattr(event, "type", None) == "content":
-                print(event.data.content, end="", flush=True)
+        def on_delta(event):
+            data = getattr(event, "data", None)
+            if not data:
+                return
 
-            # Model calls tool
-            elif getattr(event, "type", None) == "tool_call":
-                tool_name = event.data.name
-                tool_args = event.data.arguments
-                tool_call_id = event.data.id
+            chunk = (
+                getattr(data, "delta_content", None)
+                or getattr(data, "deltaContent", None)
+                or ""
+            )
 
-                if tool_name == "get_changed_python_files_tool":
-                    result = await get_changed_python_files_tool(tool_args)
+            if chunk:
+                print(chunk, end="", flush=True)
 
-                elif tool_name == "get_file_diff_tool":
-                    result = await get_file_diff_tool(tool_args)
+        def on_idle(event):
+            print("\n", flush=True)
 
-                else:
-                    result = {"ok": False, "error": f"Unknown tool {tool_name}"}
+        # Podpinamy eventy
+        unsub_delta = session.on("assistant.message_delta", on_delta)
+        unsub_idle = session.on("session.idle", on_idle)
 
-                await session.send_tool_result({
-                    "tool_call_id": tool_call_id,
-                    "result": result,
-                })
+        # ==========================================
+        # WYWOŁANIE AGENTA
+        # ==========================================
 
-            elif getattr(event, "type", None) == "done":
-                break
+        response = await session.send_and_wait({
+            "prompt": prompt
+        })
+
+        # Jeśli z jakiegoś powodu streaming nie wypisał treści:
+        if response and getattr(response, "data", None):
+            content = getattr(response.data, "content", None)
+            if content:
+                print(content)
+
+        # Sprzątanie listenerów
+        unsub_delta()
+        unsub_idle()
 
     except Exception as e:
         print("\nERROR:", repr(e))
