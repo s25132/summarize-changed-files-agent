@@ -127,3 +127,6 @@ TASK:
 """
 
 "tools": [get_changed_python_files_tool, get_file_diff_tool],
+
+@define_tool(description="Get changed Python files between two git commits.")
+@define_tool(description="Get git diff for a file between two commits.")
