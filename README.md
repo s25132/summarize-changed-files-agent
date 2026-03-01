@@ -9,6 +9,7 @@ name: Summarize Changed Files Agent
 
 on:
   push:
+  workflow_dispatch:
     inputs:
       base_sha:
         description: "Base commit SHA (older)"
