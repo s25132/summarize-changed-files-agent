@@ -1,9 +1,9 @@
-# hello-python-docker-action
+# summarize-changed-files-agent
 
 
 w .github/workflows/action.yaml
 
-name: Test Docker Action
+name: Summarize Changed Files Agent 
 
 on:
   push:
