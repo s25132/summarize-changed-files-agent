@@ -3,9 +3,21 @@ import subprocess
 import sys
 import asyncio
 from typing import List, Optional
+
 from copilot import CopilotClient
+from copilot.tools import define_tool
+from copilot.generated.session_events import SessionEventType
+from pydantic import BaseModel, Field
 import traceback
 
+class GetChangedPythonFilesParams(BaseModel):
+    base_sha: str = Field(description="The base commit SHA")
+    head_sha: str = Field(description="The head commit SHA")
+
+class SummarizeChangedFileParams(BaseModel):
+    file: str = Field(description="The file to summarize")
+    base_sha: str = Field(description="The base commit SHA")
+    head_sha: str = Field(description="The head commit SHA")
 
 
 WORKSPACE = os.environ.get("GITHUB_WORKSPACE")
@@ -13,17 +25,28 @@ if not WORKSPACE:
     print("GITHUB_WORKSPACE not set")
     sys.exit(1)
 
+_SAFE_DIR_CONFIGURED = False
 
-def get_changed_python_files(base_sha: str, head_sha: str) -> List[str]:
+def ensure_safe_directory():
+    global _SAFE_DIR_CONFIGURED
+    if _SAFE_DIR_CONFIGURED:
+        return
     subprocess.run(
         ["git", "config", "--global", "--add", "safe.directory", WORKSPACE],
         stdout=subprocess.PIPE,
         stderr=subprocess.PIPE,
         text=True,
+        check=False,
     )
+    _SAFE_DIR_CONFIGURED = True
+
+
+@define_tool(description="Get changed Python files between two git commits.")
+def get_changed_python_files(params: GetChangedPythonFilesParams) -> List[str]:
+    ensure_safe_directory()
 
     result = subprocess.run(
-        ["git", "diff", "--name-only", base_sha, head_sha],
+        ["git", "diff", "--name-only", params.base_sha, params.head_sha],
         cwd=WORKSPACE,
         text=True,
         stdout=subprocess.PIPE,
@@ -31,60 +54,53 @@ def get_changed_python_files(base_sha: str, head_sha: str) -> List[str]:
     )
 
     if result.returncode != 0:
-        print("git diff failed")
-        print(result.stdout)
-        sys.exit(result.returncode)
+        # Nie sys.exit w toolu — lepiej wyjątek (albo zwrotka z błędem)
+        raise RuntimeError(f"git diff failed:\n{result.stdout}")
 
     return [f for f in result.stdout.splitlines() if f.endswith(".py")]
+
+
+@define_tool(description="Get git diff for a file between two commits.")
+def summarize_changed_file(params: SummarizeChangedFileParams) -> str:
+    ensure_safe_directory()
+
+    diff_result = subprocess.run(
+        ["git", "diff", params.base_sha, params.head_sha, "--", params.file],
+        cwd=WORKSPACE,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+
+    if diff_result.returncode != 0:
+        # Zawsze zwracaj string
+        return f"[WARN] git diff failed for {params.file}:\n{diff_result.stderr}".strip()
+
+    diff = diff_result.stdout.strip()
+    if not diff:
+        return ""
+
+    return diff[:12000]
 
 
 def get_token() -> Optional[str]:
     return os.getenv("COPILOT_GITHUB_TOKEN") or os.getenv("GH_TOKEN") or os.getenv("GITHUB_TOKEN")
 
 
-def summarize_changed_file(file, base_sha, head_sha) -> str:
-            diff_result = subprocess.run(
-                ["git", "diff", base_sha, head_sha, "--", file],
-                cwd=WORKSPACE,
-                text=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-            )
-            if diff_result.returncode != 0:
-                print(f"[WARN] git diff failed for {file}:\n{diff_result.stderr}")
-                return
+async def main():
+    base_sha = os.environ.get("INPUT_BASE_SHA")
+    head_sha = os.environ.get("INPUT_HEAD_SHA")
+    if not base_sha or not head_sha:
+        print("Missing INPUT_BASE_SHA or INPUT_HEAD_SHA")
+        sys.exit(1)
 
-            diff = diff_result.stdout.strip()
-            if not diff:
-                return
-
-            return diff[:12000]
-
-
-def summarize_changed_files(changed_files: List[str], base_sha: str, head_sha: str) -> dict:
-        changed_files_summaries = {}
-        for f in changed_files:
-            diff = summarize_changed_file(f, base_sha, head_sha)
-            if not diff:
-                print(f"Brak zmian do podsumowania w {f}.")
-                continue
-            changed_files_summaries[f] = diff
-
-        return changed_files_summaries
-
-
-
-async def summarize_changes_with_copilot_async(changed_files_summaries: dict) -> None:
-    if not changed_files_summaries:
-        print("No Python files changed -> skipping Copilot.")
-        return
+    print(f"Base SHA: {base_sha}, Head SHA: {head_sha}")
 
     gh_token = get_token()
     if not gh_token:
         print("No token env found (COPILOT_GITHUB_TOKEN/GH_TOKEN/GITHUB_TOKEN).")
-        return
+        sys.exit(1)
 
-    # force standard env vars for CLI/SDK
     os.environ["GH_TOKEN"] = gh_token
     os.environ["COPILOT_GITHUB_TOKEN"] = gh_token
 
@@ -92,31 +108,49 @@ async def summarize_changes_with_copilot_async(changed_files_summaries: dict) ->
     client = CopilotClient()
 
     try:
-        print("Startowanie klienta Copilot...")
-        await asyncio.wait_for(client.start(), timeout=30)
-        print("Klient uruchomiony.")
+        await client.start()
 
-        print("Tworzenie sesji z modelem GPT-4.1...")
-        session = await asyncio.wait_for(
-            client.create_session({"streaming": False, "model": "gpt-4.1"}),
-            timeout=30,
-        )
-        print("Sesja utworzona.")
+        session = await client.create_session({
+            "model": "gpt-4.1",
+            "streaming": True,
+            "tools": [get_changed_python_files, summarize_changed_file],
+        })
 
-        async def ask(prompt: str, t: int = 45):
-            return await asyncio.wait_for(session.send_and_wait({"prompt": prompt}), timeout=t)
+        def handle_event(event):
+            if event.type == SessionEventType.ASSISTANT_MESSAGE_DELTA:
+                print(event.data.delta_content, end="", flush=True)
+            elif event.type == SessionEventType.SESSION_IDLE:
+                print()
 
-        # 2) Summarize changed files
-        for f, diff in changed_files_summaries.items():
-            prompt = f"Summarize the code changes in {f} in 2-4 bullet points:\n{diff}"
+        session.on(handle_event)
 
-            print(f"\nWysyłam zapytanie dla {f} (diff length: {len(diff)})...")
-            resp = await ask(prompt, 60)
-            print(f"\nPodsumowanie zmian w {f}:\n{resp.data.content}")
+        prompt = f"""
+You are a senior code review agent.
 
-    except Exception as e:
-        print("\nBłąd podczas wywoływania Copilot SDK (repr):", repr(e))
+You already have the commit SHAs:
+- base_sha: {base_sha}
+- head_sha: {head_sha}
+
+STRICT RULES:
+- Do NOT ask for parameters.
+- You MUST call the tools (first get_changed_python_files, then summarize_changed_file for each file).
+- Only after using the tools, output the Markdown report.
+- Diffs may be truncated; base your review on what you can see.
+
+TASK:
+1) Call get_changed_python_files with base_sha="{base_sha}" and head_sha="{head_sha}".
+2) For each returned Python file, call summarize_changed_file with:
+   base_sha="{base_sha}", head_sha="{head_sha}", file="<that file>"
+3) Output Markdown:
+- For each file: 2–4 bullet points.
+- Include "Risks" section if applicable.
+"""
+        await session.send_and_wait({"prompt": prompt})
+
+    except Exception:
+        print("\n[ERROR] Unhandled exception:")
         traceback.print_exc()
+        sys.exit(1)
     finally:
         try:
             await client.stop()
@@ -124,33 +158,4 @@ async def summarize_changes_with_copilot_async(changed_files_summaries: dict) ->
             pass
 
 
-def main() -> None:
-
-    base_sha = os.environ.get("INPUT_BASE_SHA")
-    head_sha = os.environ.get("INPUT_HEAD_SHA")
-    if not base_sha or not head_sha:
-        print("Missing INPUT_BASE_SHA or INPUT_HEAD_SHA")
-        sys.exit(1)
-
-    changed_py = get_changed_python_files(base_sha, head_sha)
-
-    print(f"\nComparing commits:\n  base: {base_sha}\n  head: {head_sha}\n")
-
-    if changed_py:
-        print("Changed Python files:")
-        for f in changed_py:
-            print(f" - {f}")
-    else:
-        print("No Python files changed.")
-
-    changed_files_summaries = summarize_changed_files(changed_py, base_sha, head_sha)
-
-    if not changed_files_summaries:
-        print("\nNo changes to summarize with Copilot.")
-        return
-
-    asyncio.run(summarize_changes_with_copilot_async(changed_files_summaries))
-
-
-if __name__ == "__main__":
-    main()
+asyncio.run(main())
